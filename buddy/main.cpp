@@ -1,170 +1,162 @@
-#include "block.h"
 #include "buddy.h"
-#include "list.h"
-#include <cassert>
+#include <algorithm>
+#include <iomanip>
 #include <iostream>
-#include <random>
-#include <set>
+#include <numeric>
+#include <string>
 #include <vector>
 
-void print_heap_info(Buddy_allocation &heap) {
-  std::cout << "\n[Heap Info] Chunk size: " << Buddy_allocation::k_size
-            << " bytes | Min allocation: " << Min_alloc << " bytes\n";
-}
+// La estructura VRAMResource
+struct VRAMResource {
+  void *ptr = nullptr;
+  size_t requested_size = 0;
+  size_t allocated_size = 0;
+  std::string name;
 
-// Muestra información de una asignación
-void log_allocation(size_t request, void *ptr) {
-  if (ptr)
-    std::cout << " Allocated " << request << " bytes at " << ptr << "\n";
-  else
-    std::cout << " Allocation of " << request << " bytes FAILED (OOM)\n";
-}
+  VRAMResource(std::string n, void *p, size_t req_s, size_t alloc_s)
+      : ptr(p), requested_size(req_s), allocated_size(alloc_s),
+        name(std::move(n)) {}
+};
 
-// Muestra información de liberación
-void log_free(void *ptr) { std::cout << "Freed block at " << ptr << "\n"; }
-
-void test_lists() {
-  std::cout << "\n=== Test: List Structure ===\n";
-  ListNode list;
-  ListNode elem_a, elem_b, elem_c;
-  elem_a.prev = elem_b.prev = elem_c.prev = nullptr;
-  elem_a.next = elem_b.next = elem_c.next = nullptr;
-
-  list.push(&elem_a);
-  assert(&elem_a == list.pop());
-  assert(nullptr == list.pop());
-
-  list.push(&elem_b);
-  list.push(&elem_c);
-  assert(&elem_c == list.pop());
-  assert(&elem_b == list.pop());
-  assert(nullptr == list.pop());
-
-  list.push(&elem_b);
-  list.push(&elem_c);
-  list.push(&elem_a);
-  elem_c.remove();
-  assert(&elem_a == list.pop());
-  assert(&elem_b == list.pop());
-  assert(nullptr == list.pop());
-
-  std::cout << "  ✅ List test passed\n";
-}
-
-void check_oom_after(Buddy_allocation &heap, size_t n, size_t size) {
-  if (size <= sizeof(Block)) {
-    std::cout << "Skipping invalid test" << size << '\n';
-    return;
-  }
-  std::cout << "\n=== Test: OOM after " << n << " allocations of " << size
-            << " bytes ===\n";
-
-  std::set<void *> allocations;
-  for (size_t i = 0; i < n; i++) {
-    auto ptr = heap.malloc(size);
-    log_allocation(size, ptr);
-    assert(ptr != nullptr);
-
-    const auto pair = allocations.insert(ptr);
-    assert(pair.second);
-  }
-
-  auto ptr = heap.malloc(size);
-  log_allocation(size, ptr);
-  assert(ptr == nullptr);
-
-  for (auto p : allocations)
-    heap.free(p);
-
-  std::cout << "  ✅ OOM test passed\n";
-}
-
-void stress_test() {
-  std::cout << "\n=== Stress Test: Random Alloc/Free ===\n";
-  constexpr size_t kSteps = 3000;
-
-  struct Allocation {
-    void *ptr = nullptr;
-    size_t size = 0;
-  };
-  std::vector<Allocation> allocations;
-
-  std::random_device rd;
-  std::default_random_engine gen(rd());
-  std::uniform_int_distribution<> action(0, 4);
-  std::uniform_int_distribution<> small_alloc(1, 512);
-  std::uniform_int_distribution<> medium_alloc(1024, 16384);
-  std::uniform_int_distribution<> large_alloc(32768, 262144);
-
+class VRAMManager {
+private:
   Buddy_allocation heap;
-  print_heap_info(heap);
+  std::vector<VRAMResource> resources;
+  size_t total_requested_memory = 0;
+  size_t total_allocated_memory = 0;
 
-  const auto test_allocation = [&](std::uniform_int_distribution<> &size_dist) {
-    const size_t request = size_dist(gen);
-    auto ptr = heap.malloc(request);
-    log_allocation(request, ptr);
+  void log(const std::string &message) {
+    std::cout << "[VRAM Manager] " << message << std::endl;
+  }
 
-    if (ptr) {
-      allocations.push_back({ptr, request});
+public:
+  VRAMManager() {
+    log("Iniciando subsistema de memoria gráfica.");
+    std::cout << "  > Tamaño total de VRAM simulada: "
+              << (Buddy_allocation::k_size / 1024) << " KB\n";
+    std::cout << "  > Asignación mínima (tamaño de metadatos): " << Min_alloc
+              << " bytes\n"
+              << std::endl;
+  }
+
+  void *allocate(const std::string &name, size_t size) {
+    log("Solicitud de asignación para '" + name + "' de " +
+        std::to_string(size) + " bytes.");
+    void *ptr = heap.malloc(size);
+
+    if (!ptr) {
+      std::cerr << "  ERROR: ¡Fallo de asignación! (Out of Memory en VRAM)\n"
+                << std::endl;
+      return nullptr;
     }
-  };
 
-  for (size_t step = 0; step < kSteps; step++) {
-    const auto selection = action(gen);
+    Block *block_header =
+        reinterpret_cast<Block *>(static_cast<char *>(ptr) - sizeof(Block));
+    size_t actual_size = block_header->allocate_size;
 
-    switch (allocations.empty() ? selection & 0x3 : selection) {
-    case 0:
-      test_allocation(small_alloc);
-      break;
-    case 1:
-      test_allocation(medium_alloc);
-      break;
-    case 2:
-      test_allocation(large_alloc);
-      break;
-    case 4:
-      if (!allocations.empty()) {
-        std::uniform_int_distribution<> index(0, allocations.size() - 1);
-        const auto target = index(gen);
-        auto alloc = allocations[target];
-        heap.free(alloc.ptr);
-        log_free(alloc.ptr);
-        allocations.erase(allocations.begin() + target);
-      }
-      break;
+    resources.emplace_back(name, ptr, size, actual_size);
+
+    total_requested_memory += size;
+    total_allocated_memory += actual_size;
+
+    std::cout << "  > Éxito. Asignado en la dirección " << ptr
+              << ". Bloque real: " << actual_size << " bytes.\n"
+              << std::endl;
+
+    return ptr; // Devolvemos el puntero estable
+  }
+
+  void free(void *ptr) {
+    if (!ptr)
+      return;
+    auto it =
+        std::find_if(resources.begin(), resources.end(),
+                     [ptr](const VRAMResource &res) { return res.ptr == ptr; });
+
+    if (it != resources.end()) {
+      log("Liberando recurso '" + it->name + "' (" +
+          std::to_string(it->requested_size) + " bytes).");
+
+      total_requested_memory -= it->requested_size;
+      total_allocated_memory -= it->allocated_size;
+
+      // Liberamos la memoria usando el Buddy Allocator
+      heap.free(it->ptr);
+
+      // Eliminamos el registro del vector
+      resources.erase(it);
+
+      std::cout << "  > Memoria en " << ptr << " liberada.\n" << std::endl;
     }
   }
 
-  for (const auto &alloc : allocations) {
-    heap.free(alloc.ptr);
-    log_free(alloc.ptr);
-  }
+  void print_report() {
+    double fragmentation_percentage = 0.0;
+    if (total_allocated_memory > 0) {
+      fragmentation_percentage =
+          static_cast<double>(total_allocated_memory - total_requested_memory) /
+          total_allocated_memory * 100.0;
+    }
 
-  std::cout << "\nStress test completed successfully\n";
+    std::cout << "=========================================\n";
+    std::cout << "         INFORME DE ESTADO DE VRAM        \n";
+    std::cout << "-----------------------------------------\n";
+    std::cout << "Recursos actualmente en memoria: " << resources.size()
+              << "\n";
+    std::cout << "Memoria solicitada (útil):    "
+              << total_requested_memory / 1024.0 << " KB\n";
+    std::cout << "Memoria asignada (real):      "
+              << total_allocated_memory / 1024.0 << " KB\n";
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "Fragmentación interna total:  "
+              << (total_allocated_memory - total_requested_memory) / 1024.0
+              << " KB (" << fragmentation_percentage << "%)\n";
+    std::cout << "=========================================\n\n";
+  }
+};
+
+void simulate_graphics_pipeline() {
+  std::cout << "=====================================================\n";
+  std::cout << "   Simulación de Pipeline Gráfico con Buddy Allocator \n";
+  std::cout << "=====================================================\n\n";
+
+  VRAMManager vram;
+
+  // --- FASE 1: Las variables ahora guardan void*, que son estables ---
+  std::cout << "--- FASE 1: Cargando recursos de la escena ---\n\n";
+  void *main_shader = vram.allocate("Shader Principal", 25000);
+  void *skybox_texture = vram.allocate("Textura Skybox", 500000);
+  void *player_model = vram.allocate("Modelo 3D Jugador", 120000);
+  vram.print_report();
+
+  // --- FASE 2: ---
+  std::cout << "--- FASE 2: Renderizando frames (creando recursos temporales) "
+               "---\n\n";
+  for (int frame = 1; frame <= 3; ++frame) {
+    std::cout << "--- Renderizando Frame " << frame << " ---\n";
+    void *post_processing_buffer = vram.allocate("Buffer Post-FX", 200000);
+    vram.free(post_processing_buffer);
+  }
+  std::cout << "--- Fin del renderizado de frames ---\n\n";
+  vram.print_report();
+
+  // --- FASE 3: ---
+  std::cout << "--- FASE 3: Cargando recurso dinámico ---\n\n";
+  void *enemy_model = vram.allocate("Modelo 3D Enemigo", 90000);
+  vram.print_report();
+
+  // --- FASE 4: Ahora llamamos a free con los punteros estables ---
+  std::cout
+      << "--- FASE 4: Cerrando aplicación y liberando toda la VRAM ---\n\n";
+  vram.free(main_shader);
+  vram.free(skybox_texture);
+  vram.free(player_model);
+  vram.free(enemy_model);
+
+  vram.print_report();
 }
 
 int main() {
-  std::cout << "=========================================\n";
-  std::cout << "   Buddy Memory Allocator Test Suite  \n";
-  std::cout << "=========================================\n";
-
-  test_lists();
-
-  size_t expected_n = 1;
-  size_t block_size = Buddy_allocation::k_size;
-
-  while (block_size >= Min_alloc && block_size > sizeof(Block)) {
-    std::cout << "=== Test: OOM after " << expected_n << " allocations of "
-              << (block_size - sizeof(Block)) << " bytes ===\n";
-    Buddy_allocation heap;
-    check_oom_after(heap, expected_n, block_size - sizeof(Block));
-
-    block_size /= 2;
-    expected_n *= 2;
-  }
-
-  stress_test();
-
-  std::cout << "\n All tests passed successfully.\n";
+  simulate_graphics_pipeline();
   return 0;
 }
