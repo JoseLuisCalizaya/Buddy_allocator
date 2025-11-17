@@ -7,10 +7,12 @@
 #include <cstdlib>
 
 Buddy_allocation::Buddy_allocation() {
+  heap_base = new char[k_size]();
   ListNode *root = reinterpret_cast<ListNode *>(heap_base);
   free_lists[k_maximum_order].push(root);
 }
 
+Buddy_allocation::~Buddy_allocation() { delete[] heap_base; }
 void *Buddy_allocation::malloc(const size_t request) {
   if (request == 0)
     return nullptr;

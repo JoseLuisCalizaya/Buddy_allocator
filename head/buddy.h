@@ -24,11 +24,12 @@ constexpr size_t log2(const size_t n) {
 }
 class Buddy_allocation {
 public:
-  static constexpr size_t k_size = 2 * 1024 * 1024;
+  static constexpr size_t k_size = 64 * 1024 * 1024;
   void *malloc(const size_t);
   void free(void *);
   Buddy_allocation();
-  alignas(std::max_align_t) char heap_base[k_size] = {};
+  ~Buddy_allocation();
+  alignas(std::max_align_t) char *heap_base = nullptr;
 
 private:
   static constexpr size_t k_maximum_order = log2(k_size) - log2(Min_alloc);
