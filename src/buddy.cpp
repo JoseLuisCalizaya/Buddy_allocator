@@ -36,7 +36,7 @@ void *Buddy_allocation::malloc(const size_t request) {
   if (size_for_order < r_size) {
     return nullptr;
   }
-  // 5) Buscar el primer free_list que tenga un bloque (como hacías)
+
   size_t order = required_order;
   ListNode *node = nullptr;
   for (; order <= k_maximum_order; ++order) {
@@ -54,7 +54,6 @@ void *Buddy_allocation::malloc(const size_t request) {
     to_split(parent(index));
   }
 
-  // Splitting mientras sea necesario
   while (order > required_order) {
     const auto index_here = index_to_node(node, order);
     to_split(index_here);
@@ -66,9 +65,8 @@ void *Buddy_allocation::malloc(const size_t request) {
     node = node_to_index(child_left(index_here), order);
   }
 
-  // 7) Finalizar: marcar y devolver
   auto block = node->transmute();
-  block->allocate_size = size_for_order; // usar el tamaño real para el order
+  block->allocate_size = size_for_order;
   block->allocate_from = __builtin_return_address(0);
   return block->data();
 }
