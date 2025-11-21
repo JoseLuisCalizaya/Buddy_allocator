@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <limits>
+#include <sys/types.h>
 #ifndef BUDDY_H
 #define BUDDY_H
 
@@ -10,7 +11,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
-constexpr size_t Min_alloc = std::max(sizeof(Block), sizeof(ListNode));
+constexpr size_t Min_alloc = sizeof(ListNode);
 constexpr size_t log2(const size_t n) {
   size_t r = 0;
   size_t m = 1;
@@ -35,6 +36,7 @@ private:
   static constexpr size_t k_maximum_order = log2(k_size) - log2(Min_alloc);
   ListNode free_lists[k_maximum_order + 1] = {};
   uint8_t split_nodes[(1 << k_maximum_order) / 8] = {};
+  uint8_t *metadata_orders = nullptr;
   size_t index_to_node(ListNode *, size_t);
   ListNode *node_to_index(size_t, size_t);
   size_t parent(size_t) const;
@@ -43,6 +45,9 @@ private:
   size_t sibling(size_t) const;
   bool can_split(size_t) const;
   void to_split(size_t);
+
+  void set_order(void *ptr, uint8_t order);
+  uint8_t get_order(void *ptr);
 };
 
 #endif // BUDDY_H
