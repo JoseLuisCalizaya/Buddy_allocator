@@ -1,4 +1,5 @@
-#include "buddy.h" //
+#include "head/buddy.h"
+#include "head/slab.h"
 #include <algorithm>
 #include <cstring>
 #include <iomanip>
@@ -8,21 +9,23 @@
 #include <vector>
 
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h" //
+#include "head/stb_image.h" //
 struct VRAMResource {
   void *ptr = nullptr;
   size_t requested_size = 0;
   size_t allocated_size = 0;
   std::string name;
-
-  VRAMResource(std::string n, void *p, size_t req_s, size_t alloc_s)
+  std::string allocate_type;
+  VRAMResource(std::string n, void *p, size_t req_s, size_t alloc_s,
+               std::string type)
       : ptr(p), requested_size(req_s), allocated_size(alloc_s),
-        name(std::move(n)) {}
+        name(std::move(n)), allocate_type(type) {}
 };
 
 class VRAMManager {
 private:
-  Buddy_allocation heap; //
+  Buddy_allocation buddy;
+  SlabAllocator slab;
   std::vector<VRAMResource> resources;
   size_t total_requested_memory = 0;
   size_t total_allocated_memory = 0;
@@ -32,13 +35,7 @@ private:
   }
 
 public:
-  VRAMManager() {
-    log("Iniciando subsistema de memoria gráfica.");
-    std::cout << "  > Tamaño total de VRAM simulada: "
-              << (Buddy_allocation::k_size / 1024) << " KB\n"; //
-    std::cout << "  > Asignación mínima: " << Min_alloc << " bytes\n"
-              << std::endl; //
-  }
+  VRAMManager() { log("Iniciando Sistema Híbrido (Buddy + Slab)\n"); }
 
   ~VRAMManager() {
     log("Apagando el subsistema de memoria.");
@@ -49,28 +46,48 @@ public:
   }
 
   void *allocate(const std::string &name, size_t size) {
-    log("Solicitud de asignación para '" + name + "' de " +
-        std::to_string(size) + " bytes.");
-    void *ptr = heap.malloc(size); //
+    // log("Solicitud de asignación para '" + name + "' de "
+    // +std::to_string(size) + " bytes.");
+    void *ptr = nullptr;
+    size_t actual_size = 0;
+    std::string type;
 
+    if (size <= 256) {
+      ptr = slab.allocate(size);
+      if (ptr) {
+        // Slab asigna tamaño fijo (32, 64, 128, 256)
+        if (size <= 32)
+          actual_size = 32;
+        else if (size <= 64)
+          actual_size = 64;
+        else if (size <= 128)
+          actual_size = 128;
+        else
+          actual_size = 256;
+        type = "SLAB";
+      }
+    }
     if (!ptr) {
-      std::cerr << "  ERROR: ¡Fallo de asignación! (Out of Memory en VRAM)\n"
-                << std::endl;
+      ptr = buddy.malloc(size);
+      if (ptr) {
+        size_t power_of_2 = 16; // Min_alloc
+        while (power_of_2 < size)
+          power_of_2 *= 2;
+        actual_size = power_of_2;
+        type = "BUDDY";
+      }
+    }
+    if (!ptr) {
+      std::cerr << "Error: Out of Memory para " << name << "\n";
       return nullptr;
     }
-
-    Block *block_header =
-        reinterpret_cast<Block *>(static_cast<char *>(ptr) - sizeof(Block)); //
-    size_t actual_size = block_header->allocate_size;
-
-    resources.emplace_back(name, ptr, size, actual_size);
+    resources.emplace_back(name, ptr, size, actual_size, type);
     total_requested_memory += size;
     total_allocated_memory += actual_size;
 
-    std::cout << "  > Éxito. Asignado en la dirección " << ptr
-              << ". Bloque real: " << actual_size << " bytes.\n"
-              << std::endl;
-
+    // std::cout << "Asignado: " << name << " (" << size << " bytes) -> " <<
+    // type
+    //           << " (" << actual_size << " bytes)\n";
     return ptr;
   }
 
@@ -78,32 +95,21 @@ public:
     log("Iniciando carga de imagen: " + filename);
     int width, height, channels;
 
-    unsigned char *temp_data =
+    unsigned char *data =
         stbi_load(filename.c_str(), &width, &height, &channels, 0); //
-    if (!temp_data) {
-      std::cerr << "  ERROR: No se pudo cargar la imagen o no se encontró el "
-                   "archivo '"
-                << filename << "'.\n"
-                << std::endl;
+    if (!data) {
+      std::cerr << "  Error al cargar la imagen" << filename << '\n';
       return nullptr;
     }
-    size_t image_size = width * height * channels;
-
-    void *vram_ptr = allocate(filename, image_size);
-    if (!vram_ptr) {
-      stbi_image_free(temp_data);
+    size_t size = width * height * channels;
+    void *ptr = allocate(filename, size);
+    if (ptr) {
+      memcpy(ptr, data, size);
       return nullptr;
     }
 
-    memcpy(vram_ptr, temp_data, image_size);
-
-    stbi_image_free(temp_data);
-
-    std::cout << "  > Imagen '" << filename << "' (" << width << "x" << height
-              << ", " << channels << " canales)";
-    std::cout << " cargada exitosamente en la VRAM.\n" << std::endl;
-
-    return vram_ptr;
+    stbi_image_free(data);
+    return ptr;
   }
 
   void free(void *ptr) {
@@ -112,42 +118,37 @@ public:
 
     auto it =
         std::find_if(resources.begin(), resources.end(),
-                     [ptr](const VRAMResource &res) { return res.ptr == ptr; });
+                     [ptr](const VRAMResource &r) { return r.ptr == ptr; });
 
     if (it != resources.end()) {
-      log("Liberando recurso '" + it->name + "'...");
+      // log("Liberando recurso '" + it->name + "'...");
       total_requested_memory -= it->requested_size;
       total_allocated_memory -= it->allocated_size;
-      heap.free(it->ptr); //
+      if (it->allocate_type == "SLAB")
+        slab.free(ptr);
+      else
+        buddy.free(ptr);
+      std::cout << "  > Memoria en " << ptr << " liberada.\n";
       resources.erase(it);
-      std::cout << "  > Memoria en " << ptr << " liberada.\n" << std::endl;
     } else {
       std::cerr << "  ADVERTENCIA: Se intentó liberar un puntero de memoria no "
                    "reconocido: "
-                << ptr << std::endl;
+                << ptr << '\n';
     }
   }
-
   void print_report() {
-    double fragmentation_percentage = 0.0;
-    if (total_allocated_memory > 0) {
-      fragmentation_percentage =
-          static_cast<double>(total_allocated_memory - total_requested_memory) /
-          total_allocated_memory * 100.0;
-    }
-    std::cout << "=========================================\n";
-    std::cout << "         INFORME DE ESTADO DE VRAM        \n";
-    std::cout << "-----------------------------------------\n";
-    std::cout << "  Recursos en memoria: " << resources.size() << "\n";
-    std::cout << "  Memoria útil solicitada: "
-              << total_requested_memory / 1024.0 << " KB\n";
-    std::cout << "  Memoria real asignada:   "
-              << total_allocated_memory / 1024.0 << " KB\n";
-    std::cout << std::fixed << std::setprecision(2);
-    std::cout << "  Fragmentación interna: "
-              << (total_allocated_memory - total_requested_memory) / 1024.0
-              << " KB (" << fragmentation_percentage << "%)\n";
-    std::cout << "=========================================\n\n";
+    double frag = 0;
+    if (total_allocated_memory > 0)
+      frag = 100.0 * (total_allocated_memory - total_requested_memory) /
+             total_allocated_memory;
+
+    std::cout << "\n=== REPORTE DE VRAM ===\n";
+    std::cout << "Objetos en memoria: " << resources.size() << "\n";
+    std::cout << "Memoria Solicitada: " << total_requested_memory << " bytes\n";
+    std::cout << "Memoria Asignada:   " << total_allocated_memory << " bytes\n";
+    std::cout << "Fragmentación:      " << std::fixed << std::setprecision(2)
+              << frag << "%\n";
+    std::cout << "=======================\n\n";
   }
 };
 
