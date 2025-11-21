@@ -7,7 +7,11 @@
 #include <cstdlib>
 
 Buddy_allocation::Buddy_allocation() {
+
   heap_base = new char[k_size]();
+  size_t num_min_blocks = k_size / Min_alloc;
+  metadata_orders = new uint8_t[num_min_blocks]();
+
   ListNode *root = reinterpret_cast<ListNode *>(heap_base);
   free_lists[k_maximum_order].push(root);
 }
