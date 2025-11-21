@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <sys/types.h>
 
 Buddy_allocation::Buddy_allocation() {
 
@@ -16,7 +17,22 @@ Buddy_allocation::Buddy_allocation() {
   free_lists[k_maximum_order].push(root);
 }
 
-Buddy_allocation::~Buddy_allocation() { delete[] heap_base; }
+Buddy_allocation::~Buddy_allocation() {
+  delete[] heap_base;
+  delete[] metadata_orders;
+}
+
+Buddy_allocation::set_order(void *ptr, uint8_t order) {
+  size_t offset = static_cast<char *>(ptr) - heap_base;
+  size_t index = offset / Min_alloc;
+  metadata_orders[index] = order;
+}
+
+Buddy_allocation::get_order(void *ptr) {
+  size_t offset = static_cast<char *>(ptr) - heap_base;
+  size_t index = offset / Min_alloc;
+  return metadata_orders[index];
+}
 void *Buddy_allocation::malloc(const size_t request) {
   if (request == 0)
     return nullptr;
