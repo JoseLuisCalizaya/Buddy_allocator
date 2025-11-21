@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <sys/types.h>
@@ -34,29 +35,23 @@ Buddy_allocation::get_order(void *ptr) {
   return metadata_orders[index];
 }
 void *Buddy_allocation::malloc(const size_t request) {
-  if (request == 0)
-    return nullptr;
-  if (request > SIZE_MAX - sizeof(Block))
+
+  if (request == 0 || request > k_size)
     return nullptr;
 
-  const size_t required_size_unrounded = request + sizeof(Block);
-  const size_t r_size = std::max(required_size_unrounded, (size_t)Min_alloc);
-  if (r_size > k_size)
-    return nullptr;
+  const size_t r_size = std::max(request, (size_t)Min_alloc);
 
   size_t required_order = 0;
   size_t size_for_order = Min_alloc;
   while (size_for_order < r_size) {
-    if (required_order >= k_maximum_order)
-      break;
     size_for_order <<= 1; // *2
     required_order++;
   }
   // Si aun con el mayor orden no hay sitio, falla
-  if (size_for_order < r_size) {
+  if (required_order > k_maximum_order)
     return nullptr;
-  }
 
+  // Buscar bloque de memoria libre
   size_t order = required_order;
   ListNode *node = nullptr;
   for (; order <= k_maximum_order; ++order) {
@@ -65,10 +60,10 @@ void *Buddy_allocation::malloc(const size_t request) {
       break;
   }
 
-  if (!node) {
+  if (!node)
     return nullptr;
-  }
 
+  // split
   auto index = index_to_node(node, order);
   if (order < k_maximum_order) {
     to_split(parent(index));
@@ -84,11 +79,10 @@ void *Buddy_allocation::malloc(const size_t request) {
 
     node = node_to_index(child_left(index_here), order);
   }
-
-  auto block = node->transmute();
-  block->allocate_size = size_for_order;
-  block->allocate_from = __builtin_return_address(0);
-  return block->data();
+  // Guardar metadatos externamente
+  void *ptr = reinterpret_cast<void *>(node);
+  set_order(ptr, (uint8_t)required_order);
+  return ptr;
 }
 
 void Buddy_allocation::free(void *ptr) {
