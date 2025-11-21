@@ -88,13 +88,16 @@ void *Buddy_allocation::malloc(const size_t request) {
 void Buddy_allocation::free(void *ptr) {
   if (!ptr)
     return;
-  Block *block =
-      reinterpret_cast<Block *>(reinterpret_cast<char *>(ptr) - sizeof(Block));
-  assert(block->allocate_from != nullptr);
-  assert(block->allocate_size <= Buddy_allocation::k_size);
 
-  auto order = log2(block->allocate_size) - log2(Min_alloc);
-  ListNode *node = block->transmute();
+  // recuperacion de metadata
+  uint8_t stored_order = get_order(ptr);
+  size_t size = (size_t)Min_alloc << stored_order;
+
+  if ((char *)ptr < heap_base || (char *)ptr >= heap_base + k_size)
+    return;
+
+  size_t order = stored_order;
+  ListNode *node = reinterpret_cast<ListNode *>(ptr);
   auto index = index_to_node(node, order);
 
   while (order < k_maximum_order && can_split(parent(index))) {
