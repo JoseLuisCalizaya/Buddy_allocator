@@ -34,3 +34,19 @@ void *LinearAllocator::allocate(size_t size) {
   std::cout << "[LinearAllocator] Nueva Pagina creada " << new_page_req << '\n';
   return ptr;
 }
+
+bool LinearAllocator::owns(void *ptr) const {
+  for (const auto &page : pages) {
+    if (ptr <= page.base_ptr &&
+        ptr < static_cast<char *>(page.base_ptr) + page.total_size)
+      return true;
+  }
+  return false;
+}
+
+void LinearAllocator::reset() {
+  for (auto &page : pages) {
+    buddy.free(page.base_ptr);
+  }
+  pages.clear();
+}
