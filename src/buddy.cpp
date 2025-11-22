@@ -1,5 +1,5 @@
-#include "buddy.h"
-#include "list.h"
+#include "../head/buddy.h"
+#include "../head/list.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -23,13 +23,13 @@ Buddy_allocation::~Buddy_allocation() {
   delete[] metadata_orders;
 }
 
-Buddy_allocation::set_order(void *ptr, uint8_t order) {
+void Buddy_allocation::set_order(void *ptr, uint8_t order) {
   size_t offset = static_cast<char *>(ptr) - heap_base;
   size_t index = offset / Min_alloc;
   metadata_orders[index] = order;
 }
 
-Buddy_allocation::get_order(void *ptr) {
+uint8_t Buddy_allocation::get_order(void *ptr) {
   size_t offset = static_cast<char *>(ptr) - heap_base;
   size_t index = offset / Min_alloc;
   return metadata_orders[index];
