@@ -1,4 +1,5 @@
 #include "head/buddy.h"
+#include "head/linear.h"
 #include "head/slab.h"
 #include <algorithm>
 #include <cstring>
@@ -26,6 +27,7 @@ class VRAMManager {
 private:
   Buddy_allocation buddy;
   SlabAllocator slab;
+  LinearAllocator linear;
   std::vector<VRAMResource> resources;
   size_t total_requested_memory = 0;
   size_t total_allocated_memory = 0;
@@ -35,7 +37,9 @@ private:
   }
 
 public:
-  VRAMManager() { log("Iniciando Sistema Híbrido (Buddy + Slab)\n"); }
+  VRAMManager() : linear(buddy, 4 * 1024 * 1024) {
+    log("Iniciando Sistema Híbrido (Buddy + Slab)\n");
+  }
 
   ~VRAMManager() {
     log("Apagando el subsistema de memoria.");
@@ -49,7 +53,7 @@ public:
     // log("Solicitud de asignación para '" + name + "' de "
     // +std::to_string(size) + " bytes.");
     void *ptr = nullptr;
-    size_t actual_size = 0;
+    size_t actual_size = size;
     std::string type;
 
     if (size <= 256) {
@@ -67,6 +71,15 @@ public:
         type = "SLAB";
       }
     }
+
+    if (!ptr && size <= 4 * 1024 * 1024) {
+      ptr = linear.allocate(size);
+      if (ptr) {
+        actual_size = (size + 3) & ~3;
+        type = "LINEAR";
+      }
+    }
+
     if (!ptr) {
       ptr = buddy.malloc(size);
       if (ptr) {
@@ -77,10 +90,12 @@ public:
         type = "BUDDY";
       }
     }
+
     if (!ptr) {
       std::cerr << "Error: Out of Memory para " << name << "\n";
       return nullptr;
     }
+
     resources.emplace_back(name, ptr, size, actual_size, type);
     total_requested_memory += size;
     total_allocated_memory += actual_size;
@@ -126,10 +141,12 @@ public:
       // log("Liberando recurso '" + it->name + "'...");
       total_requested_memory -= it->requested_size;
       total_allocated_memory -= it->allocated_size;
-      if (it->allocate_type == "SLAB")
+      if (it->allocate_type == "SLAB") {
         slab.free(ptr);
-      else
+      } else if (it->allocate_type == "LINEAR") {
+      } else {
         buddy.free(ptr);
+      }
       std::cout << "  > Memoria en " << ptr << " liberada.\n";
       resources.erase(it);
     } else {
@@ -155,25 +172,25 @@ public:
 };
 
 void run_experiment() {
+
   VRAMManager vram;
 
-  std::cout << "--- Test 0: Textura Grnde\n ";
-  void *tex0 = vram.load_image_to_vram("prueba01.jpg");
-  vram.print_report();
-  std::cout << "--- Test 1: Textura Grande \n";
-  void *tex = vram.load_image_to_vram("prueba02.jpg");
+  std::cout << "--- Test 1: Textura 704KB ---\n";
+  void *tex1 = vram.load_image_to_vram("prueba01.jpg");
   vram.print_report();
 
-  std::cout << "Test 2: Shaders Pequeños \n";
-  void *shader1 =
-      vram.allocate("Shader_PostProcess", 35000); // Grande, va a Buddy
-  void *shader2 =
-      vram.allocate("Shader_Vertex_Tiny", 30); // Pequeño, va a Slab 32
+  std::cout << "--- Test 2: Textura 4MB ---\n";
+  void *tex2 = vram.load_image_to_vram("prueba02.jpg");
   vram.print_report();
-  vram.free(tex0);
-  vram.free(tex);
-  vram.free(shader1);
-  vram.free(shader2);
+
+  std::cout << "--- Test 3: Shaders Pequeños ---\n";
+  void *shader = vram.allocate("Shader_Test", 35);
+  vram.print_report();
+
+  printf("--- Liberación ---\n");
+  vram.free(tex1);
+  vram.free(tex2);
+  vram.free(shader);
   vram.print_report();
 }
 
