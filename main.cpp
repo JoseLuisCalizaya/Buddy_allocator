@@ -105,10 +105,12 @@ public:
     void *ptr = allocate(filename, size);
     if (ptr) {
       memcpy(ptr, data, size);
+      stbi_image_free(data);
+    } else {
+      stbi_image_free(data);
       return nullptr;
     }
 
-    stbi_image_free(data);
     return ptr;
   }
 
