@@ -156,17 +156,21 @@ public:
 
 void run_experiment() {
   VRAMManager vram;
-  std::cout << "--- Test 1: Textura Grande (Problema de 128KB/4MB) ---\n";
-  void *tex = vram.load_image_to_vram(
-      "prueba02.jpg"); // Asegurate que prueba02.jpg sea 1024x1024
+
+  std::cout << "--- Test 0: Textura Grnde\n ";
+  void *tex0 = vram.load_image_to_vram("prueba01.jpg");
+  vram.print_report();
+  std::cout << "--- Test 1: Textura Grande \n";
+  void *tex = vram.load_image_to_vram("prueba02.jpg");
   vram.print_report();
 
-  std::cout << "--- Test 2: Shaders Pequeños (Problema de fragmentación) ---\n";
+  std::cout << "Test 2: Shaders Pequeños \n";
   void *shader1 =
       vram.allocate("Shader_PostProcess", 35000); // Grande, va a Buddy
   void *shader2 =
       vram.allocate("Shader_Vertex_Tiny", 30); // Pequeño, va a Slab 32
   vram.print_report();
+  vram.free(tex0);
   vram.free(tex);
   vram.free(shader1);
   vram.free(shader2);
