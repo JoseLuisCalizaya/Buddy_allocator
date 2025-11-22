@@ -152,42 +152,26 @@ public:
   }
 };
 
-// --- FUNCIÓN DE SIMULACIÓN CORREGIDA ---
-void simulate_real_resource_loading() {
-  std::cout << "=====================================================\n";
-  std::cout << "   Simulación con Carga de Recursos Gráficos Reales \n";
-  std::cout << "=====================================================\n\n";
-
+void run_experiment() {
   VRAMManager vram;
-  printf("Inicio\n");
+  std::cout << "--- Test 1: Textura Grande (Problema de 128KB/4MB) ---\n";
+  void *tex = vram.load_image_to_vram(
+      "prueba02.jpg"); // Asegurate que prueba02.jpg sea 1024x1024
   vram.print_report();
 
-  void *texture1 = vram.load_image_to_vram("prueba01.jpg");
-  if (!texture1) {
-    std::cerr << "Finalizando simulación debido a error de carga.\n";
-    return;
-  }
+  std::cout << "--- Test 2: Shaders Pequeños (Problema de fragmentación) ---\n";
+  void *shader1 =
+      vram.allocate("Shader_PostProcess", 35000); // Grande, va a Buddy
+  void *shader2 =
+      vram.allocate("Shader_Vertex_Tiny", 30); // Pequeño, va a Slab 32
   vram.print_report();
-
-  void *main_shader = vram.allocate("Shader de Iluminación", 35000);
-  printf("Carga del main_shader\n");
-  vram.print_report();
-
-  void *texture2 = vram.load_image_to_vram("prueba02.jpg");
-  if (!texture2) {
-    std::cerr << "Error de carga de textura 02\n";
-    return;
-  }
-  vram.print_report();
-
-  printf("Liberacion\n");
-  vram.free(main_shader);
-  vram.free(texture1);
-  vram.free(texture2);
+  vram.free(tex);
+  vram.free(shader1);
+  vram.free(shader2);
   vram.print_report();
 }
 
 int main() {
-  simulate_real_resource_loading();
+  run_experiment();
   return 0;
 }
